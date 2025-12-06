@@ -24,7 +24,7 @@ object NetworkModule {
         okHttpClient: OkHttpClient
     ): WeatherApiService =
         Retrofit.Builder()
-            .baseUrl(WeatherApiService.BASE_URL)
+            .baseUrl(BuildConfig.BASE_URL)
             .client(okHttpClient)
             .addConverterFactory(GsonConverterFactory.create(gson))
             .build()
