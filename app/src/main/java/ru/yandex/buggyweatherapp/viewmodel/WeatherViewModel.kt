@@ -7,6 +7,7 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -26,7 +27,8 @@ import javax.inject.Inject
 @HiltViewModel
 class WeatherViewModel @Inject constructor(
     private val weatherRepository: WeatherRepositoryImpl,
-    private val locationRepository: LocationRepositoryImpl
+    private val locationRepository: LocationRepositoryImpl,
+    private val coroutineDispatcher: CoroutineDispatcher
 ) : ViewModel() {
     private val _viewState = MutableLiveData<WeatherScreenUIState>()
     val viewState: LiveData<WeatherScreenUIState> = _viewState
@@ -61,8 +63,8 @@ class WeatherViewModel @Inject constructor(
     fun getWeatherForLocation(location: Location) {
         isLoading()
 
-        weatherRepository.getWeatherData(location) { data, exception ->
-            viewModelScope.launch {
+        viewModelScope.launch(coroutineDispatcher) {
+            weatherRepository.getWeatherData(location) { data, exception ->
                 if (data != null) {
                     _viewState.postValue(
                         viewState.value?.copy(
@@ -92,22 +94,24 @@ class WeatherViewModel @Inject constructor(
         }
         isLoading()
 
-        weatherRepository.getWeatherByCity(city) { data, exception ->
-            if (data != null) {
-                _viewState.value = viewState.value?.copy(
-                    isLoading = false,
-                    error = null,
-                    currentLocation = Location(0.0, 0.0, data.cityName),
-                    weatherData = data,
-                    cityName = data.cityName
-                )
-            } else {
-                _viewState.postValue(
-                    viewState.value?.copy(
+        viewModelScope.launch(coroutineDispatcher) {
+            weatherRepository.getWeatherByCity(city) { data, exception ->
+                if (data != null) {
+                    _viewState.value = viewState.value?.copy(
                         isLoading = false,
-                        error = exception?.message ?: UNKNOW_ERROR,
+                        error = null,
+                        currentLocation = Location(0.0, 0.0, data.cityName),
+                        weatherData = data,
+                        cityName = data.cityName
                     )
-                )
+                } else {
+                    _viewState.postValue(
+                        viewState.value?.copy(
+                            isLoading = false,
+                            error = exception?.message ?: UNKNOW_ERROR,
+                        )
+                    )
+                }
             }
         }
     }
@@ -119,7 +123,7 @@ class WeatherViewModel @Inject constructor(
 
 
     fun loadWeatherIcon(iconCode: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(coroutineDispatcher) {
             val iconUrl = "https://openweathermap.org/img/wn/$iconCode@2x.png"
             ImageLoader.loadImage(iconUrl)
         }

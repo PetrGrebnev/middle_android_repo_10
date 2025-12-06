@@ -11,16 +11,17 @@ import ru.yandex.buggyweatherapp.model.WeatherData
 import javax.inject.Inject
 
 class WeatherRepositoryImpl @Inject constructor(
-    private val weatherApi: WeatherApiService
+    private val weatherApi: WeatherApiService,
 ) : WeatherRepository {
     private var cachedWeatherData: WeatherData? = null
 
-    override fun getWeatherData(location: Location, callback: (WeatherData?, Exception?) -> Unit) {
-        val call = weatherApi.getCurrentWeather(location.latitude, location.longitude)
-        
+    override suspend fun getWeatherData(
+        location: Location,
+        callback: (WeatherData?, Exception?) -> Unit
+    ) {
+        val response = weatherApi.getCurrentWeather(location.latitude, location.longitude)
+
         try {
-            val response = call.execute()
-            
             if (response.isSuccessful) {
                 val weatherData = parseWeatherData(response.body()!!, location)
                 cachedWeatherData = weatherData
@@ -33,37 +34,33 @@ class WeatherRepositoryImpl @Inject constructor(
             callback(null, e)
         }
     }
-    
-    override fun getWeatherByCity(cityName: String, callback: (WeatherData?, Exception?) -> Unit) {
-        weatherApi.getWeatherByCity(cityName).enqueue(object : Callback<JsonObject> {
-            override fun onResponse(call: Call<JsonObject>, response: Response<JsonObject>) {
-                if (response.isSuccessful && response.body() != null) {
-                    try {
-                        val json = response.body()!!
-                        val location = extractLocationFromResponse(json)
-                        val weatherData = parseWeatherData(json, location)
-                        callback(weatherData, null)
-                    } catch (e: Exception) {
-                        callback(null, e)
-                    }
-                } else {
-                    callback(null, Exception("Error fetching weather data"))
-                }
+
+    override suspend fun getWeatherByCity(
+        cityName: String,
+        callback: (WeatherData?, Exception?) -> Unit
+    ) {
+        val response = weatherApi.getWeatherByCity(cityName)
+        if (response.isSuccessful && response.body() != null) {
+            try {
+                val json = response.body()!!
+                val location = extractLocationFromResponse(json)
+                val weatherData = parseWeatherData(json, location)
+                callback(weatherData, null)
+            } catch (e: Exception) {
+                callback(null, e)
             }
-            
-            override fun onFailure(call: Call<JsonObject>, t: Throwable) {
-                callback(null, Exception(t))
-            }
-        })
+        } else {
+            callback(null, Exception("Error fetching weather data"))
+        }
     }
-    
+
     private fun parseWeatherData(json: JsonObject, location: Location): WeatherData {
         val main = json.getAsJsonObject("main")
         val wind = json.getAsJsonObject("wind")
         val sys = json.getAsJsonObject("sys")
         val weather = json.getAsJsonArray("weather").get(0).asJsonObject
         val clouds = json.getAsJsonObject("clouds")
-        
+
         return WeatherData(
             cityName = json.get("name").asString,
             country = sys.get("country").asString,
@@ -83,19 +80,19 @@ class WeatherRepositoryImpl @Inject constructor(
             timezone = json.get("timezone").asInt,
             timestamp = json.get("dt").asLong,
             rawApiData = json.toString(),
-            rain = if (json.has("rain") && json.getAsJsonObject("rain").has("1h")) 
-                    json.getAsJsonObject("rain").get("1h").asDouble else null,
+            rain = if (json.has("rain") && json.getAsJsonObject("rain").has("1h"))
+                json.getAsJsonObject("rain").get("1h").asDouble else null,
             snow = if (json.has("snow") && json.getAsJsonObject("snow").has("1h"))
-                    json.getAsJsonObject("snow").get("1h").asDouble else null
+                json.getAsJsonObject("snow").get("1h").asDouble else null
         )
     }
-    
+
     private fun extractLocationFromResponse(json: JsonObject): Location {
         val coord = json.getAsJsonObject("coord")
         val lat = coord.get("lat").asDouble
         val lon = coord.get("lon").asDouble
         val name = json.get("name").asString
-        
+
         return Location(lat, lon, name)
     }
 }
