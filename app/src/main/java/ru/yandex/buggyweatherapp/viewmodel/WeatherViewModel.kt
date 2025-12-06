@@ -1,157 +1,165 @@
 package ru.yandex.buggyweatherapp.viewmodel
 
-import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import ru.yandex.buggyweatherapp.WeatherApplication
 import ru.yandex.buggyweatherapp.model.Location
 import ru.yandex.buggyweatherapp.model.WeatherData
-import ru.yandex.buggyweatherapp.repository.LocationRepository
-import ru.yandex.buggyweatherapp.repository.WeatherRepository
+import ru.yandex.buggyweatherapp.repository.LocationRepositoryImpl
+import ru.yandex.buggyweatherapp.repository.WeatherRepositoryImpl
+import ru.yandex.buggyweatherapp.ui.screens.WeatherScreenUIState
 import ru.yandex.buggyweatherapp.utils.ImageLoader
 import java.util.Timer
 import java.util.TimerTask
+import javax.inject.Inject
 
-class WeatherViewModel : ViewModel() {
-    
-    
-    private lateinit var activityContext: Context
-    
-    
-    private val weatherRepository = WeatherRepository()
-    private val locationRepository by lazy { 
-        LocationRepository(activityContext)
-    }
-    
-    
-    val weatherData = MutableLiveData<WeatherData>()
-    val currentLocation = MutableLiveData<Location>()
-    val isLoading = MutableLiveData<Boolean>()
-    val error = MutableLiveData<String>()
-    val cityName = MutableLiveData<String>()
-    
-    
-    private val coroutineScope = CoroutineScope(Dispatchers.Main + Job())
-    
-    
-    private var refreshTimer: Timer? = null
-    
-    
-    fun initialize(context: Context) {
-        this.activityContext = context
+@HiltViewModel
+class WeatherViewModel @Inject constructor(
+    private val weatherRepository: WeatherRepositoryImpl,
+    private val locationRepository: LocationRepositoryImpl,
+    private val coroutineDispatcher: CoroutineDispatcher
+) : ViewModel() {
+    private val _viewState = MutableLiveData<WeatherScreenUIState>()
+    val viewState: LiveData<WeatherScreenUIState> = _viewState
+
+    init {
         fetchCurrentLocationWeather()
-        
-        
         startAutoRefresh()
     }
-    
-    
+
     fun fetchCurrentLocationWeather() {
-        isLoading.value = true
-        error.value = null
-        
+        isLoading()
+
         locationRepository.getCurrentLocation { location ->
             if (location != null) {
-                currentLocation.value = location
-                
-                
                 val cityNameFromLocation = locationRepository.getCityNameFromLocation(location)
-                cityName.value = cityNameFromLocation
-                
+
+                _viewState.value = viewState.value?.copy(
+                    isLoading = false,
+                    currentLocation = location,
+                    cityName = cityNameFromLocation
+                )
                 getWeatherForLocation(location)
             } else {
-                isLoading.value = false
-                error.value = "Unable to get current location"
+                _viewState.value = viewState.value?.copy(
+                    isLoading = false,
+                    error = "Unable to get current location"
+                )
             }
         }
     }
-    
+
     fun getWeatherForLocation(location: Location) {
-        isLoading.value = true
-        error.value = null
-        
-        weatherRepository.getWeatherData(location) { data, exception ->
-            
-            Handler(Looper.getMainLooper()).post {
-                isLoading.value = false
-                
+        isLoading()
+
+        viewModelScope.launch(coroutineDispatcher) {
+            weatherRepository.getWeatherData(location) { data, exception ->
                 if (data != null) {
-                    weatherData.value = data
+                    _viewState.postValue(
+                        viewState.value?.copy(
+                            isLoading = false,
+                            error = null,
+                            weatherData = data
+                        )
+                    )
                 } else {
-                    error.value = exception?.message ?: "Unknown error"
+                    _viewState.postValue(
+                        viewState.value?.copy(
+                            isLoading = false,
+                            error = exception?.message ?: UNKNOW_ERROR,
+                        )
+                    )
                 }
             }
         }
     }
-    
+
     fun searchWeatherByCity(city: String) {
         if (city.isBlank()) {
-            error.value = "City name cannot be empty"
+            _viewState.value = viewState.value?.copy(
+                error = "City name cannot be empty"
+            )
             return
         }
-        
-        isLoading.value = true
-        error.value = null
-        
-        
-        weatherRepository.getWeatherByCity(city) { data, exception ->
-            
-            isLoading.value = false
-            
-            if (data != null) {
-                weatherData.value = data
-                cityName.value = data.cityName
-                currentLocation.value = Location(0.0, 0.0, data.cityName)
-            } else {
-                error.value = exception?.message ?: "Unknown error"
+        isLoading()
+
+        viewModelScope.launch(coroutineDispatcher) {
+            weatherRepository.getWeatherByCity(city) { data, exception ->
+                if (data != null) {
+                    _viewState.value = viewState.value?.copy(
+                        isLoading = false,
+                        error = null,
+                        currentLocation = Location(0.0, 0.0, data.cityName),
+                        weatherData = data,
+                        cityName = data.cityName
+                    )
+                } else {
+                    _viewState.postValue(
+                        viewState.value?.copy(
+                            isLoading = false,
+                            error = exception?.message ?: UNKNOW_ERROR,
+                        )
+                    )
+                }
             }
         }
     }
-    
-    
+
+
     fun formatTemperature(temp: Double): String {
         return "${temp.toInt()}°C"
     }
-    
-    
+
+
     fun loadWeatherIcon(iconCode: String) {
-        coroutineScope.launch {
+        viewModelScope.launch(coroutineDispatcher) {
             val iconUrl = "https://openweathermap.org/img/wn/$iconCode@2x.png"
             ImageLoader.loadImage(iconUrl)
         }
     }
-    
-    
+
+
     private fun startAutoRefresh() {
-        refreshTimer = Timer()
-        refreshTimer?.scheduleAtFixedRate(object : TimerTask() {
-            override fun run() {
-                currentLocation.value?.let { location ->
-                    getWeatherForLocation(location)
+        viewModelScope.launch {
+            while (isActive) {
+                delay(REFRESH_DELAY)
+                viewState.value?.let {
+                    if (it.currentLocation != null) {
+                        getWeatherForLocation(it.currentLocation)
+                    }
                 }
             }
-        }, 60000, 60000)
-    }
-    
-    
-    fun toggleFavorite() {
-        weatherData.value?.let {
-            it.isFavorite = !it.isFavorite
-            
-            weatherData.value = it
         }
     }
-    
-    
-    override fun onCleared() {
-        super.onCleared()
-        
+
+    fun toggleFavorite(isFavorite: Boolean) {
+        _viewState.value = viewState.value?.copy(
+            weatherData = viewState.value?.weatherData?.copy(
+                isFavorite = isFavorite
+            )
+        )
+    }
+
+    private fun isLoading() {
+        _viewState.value = viewState.value?.copy(
+            isLoading = true,
+            error = null
+        )
+    }
+
+    companion object {
+        private const val UNKNOW_ERROR = "Unknown error"
+        private const val REFRESH_DELAY: Long = 60000
     }
 }
