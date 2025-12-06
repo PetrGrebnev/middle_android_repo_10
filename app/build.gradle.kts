@@ -2,6 +2,8 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.dagger.hilt)
 }
 
 android {
@@ -19,6 +21,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            isDebuggable = true
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
@@ -36,6 +41,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -64,6 +70,10 @@ dependencies {
 
     // Coil image loading
     implementation(libs.coil)
+
+    // Dagger-Hilt
+    implementation(libs.dagger.hilt)
+    ksp(libs.dagger.hilt.compiler)
 
     // Testing
     testImplementation(libs.junit)
