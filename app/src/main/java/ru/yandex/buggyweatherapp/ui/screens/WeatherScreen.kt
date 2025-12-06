@@ -44,12 +44,7 @@ fun WeatherScreen(
     viewModel: WeatherViewModel = viewModel(),
     modifier: Modifier = Modifier
 ) {
-
-    val weatherData by viewModel.weatherData.observeAsState()
-    val isLoading by viewModel.isLoading.observeAsState(false)
-    val error by viewModel.error.observeAsState()
-    val cityName by viewModel.cityName.observeAsState("")
-
+    val viewState by viewModel.viewState.observeAsState()
     var searchText by remember { mutableStateOf("") }
 
     Column(
@@ -80,12 +75,11 @@ fun WeatherScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
 
-        if (isLoading && weatherData == null) {
+        if (viewState?.isLoading == true && viewState?.weatherData == null) {
             Text("Loading weather data...")
         }
 
-
-        error?.let {
+        viewState?.error?.let {
             Text(
                 text = it,
                 color = MaterialTheme.colorScheme.error,
@@ -93,13 +87,15 @@ fun WeatherScreen(
             )
         }
 
-        weatherData?.let { weather ->
-            WeatherCard(
-                weather = weather,
-                cityName = cityName,
-                onFavoriteClick = { viewModel.toggleFavorite() },
-                onRefreshClick = { viewModel.fetchCurrentLocationWeather() }
-            )
+        viewState?.let { state ->
+            if (state.weatherData != null && state.cityName != null) {
+                WeatherCard(
+                    weather = state.weatherData,
+                    cityName = state.cityName,
+                    onFavoriteClick = { viewModel.toggleFavorite(it) },
+                    onRefreshClick = { viewModel.fetchCurrentLocationWeather() }
+                )
+            }
         }
     }
 }
@@ -108,7 +104,7 @@ fun WeatherScreen(
 fun WeatherCard(
     weather: WeatherData,
     cityName: String,
-    onFavoriteClick: () -> Unit,
+    onFavoriteClick: (Boolean) -> Unit,
     onRefreshClick: () -> Unit
 ) {
     Card(
@@ -132,7 +128,7 @@ fun WeatherCard(
                 )
 
                 Row {
-                    IconButton(onClick = onFavoriteClick) {
+                    IconButton(onClick = { onFavoriteClick(!weather.isFavorite) }) {
                         Icon(
                             imageVector = if (weather.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                             contentDescription = "Favorite"
